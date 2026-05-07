@@ -1,6 +1,6 @@
 # IT-CRM: Sistema de Gestión de Clientes y Tickets
 
-Sistema CRM minimalista para gestión de clientes y tickets de problemas, construido con Node.js, Express y MongoDB.
+Sistema CRM minimalista para gestión de clientes y tickets de problemas, construido con Node.js, Express y MongoDB..
 
 ---
 
