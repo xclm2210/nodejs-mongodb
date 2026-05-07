@@ -1,0 +1,54 @@
+services:
+  app:
+    container_name: DoD
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: it-crm:v0.1
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      MONGO_URI: mongodb://root:DoD_CRM_DATABASE_25@mongodb:27017/crm?authSource=admin
+    depends_on:
+      - mongodb
+    networks:
+      - DoD-CRM-NETWORK
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: DoD_CRM_DATABASE_25
+      MONGO_INITDB_DATABASE: crm
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - DoD-CRM-NETWORK
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - DoD-CRM-NETWORK
+    restart: unless-stopped
+
+networks:
+  DoD-CRM-NETWORK:
+    name: DoD-CRM-NETWORK
+    driver: bridge
+
+volumes:
+  mongodb_data:
+    name: mongodb_data
+  grafana_data:
+    name: grafana_data

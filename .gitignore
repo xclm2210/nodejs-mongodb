@@ -1,0 +1,51 @@
+## .gitignore for Node.js projects
+
+# Node modules
+node_modules/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime files
+pids
+*.pid
+*.seed
+
+# Environment variables
+.env
+.env.*.local
+
+# Dependency directories
+/.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+coverage/
+
+# Editor directories and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Optional caches
+.cache/
+.parcel-cache/
+
+# Next.js, Nuxt, etc.
+.next/
+.nuxt/
+.out/
+
+# Docker
+# Ignore local Docker compose override if used for credentials
+docker-compose.override.yml
+
+# Misc
+*.tgz
