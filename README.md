@@ -1,3 +1,4 @@
+## Plan de Ejecución del Proyecto
 # IT-CRM: Sistema de Gestión de Clientes y Tickets
 
 Sistema CRM minimalista para gestión de clientes y tickets de problemas, construido con Node.js, Express y MongoDB.
@@ -18,10 +19,123 @@ entorno-desarrollo/
 │   │   ├── Cliente.js   # Modelo Cliente
 │   │   └── Ticket.js   # Modelo Ticket
 │   └── routes/
-│       ├── clientes.routes.js   # API Clientes
-│       └── tickets.routes.js   # API Tickets
+│       ├── clientes.routes.js # Endpoints REST: /api/clientes
+│       └── tickets.routes.js   # Endpoints REST: /api/tickets
 └── README.md
 ```
+
+---
+
+
+### Paso 1 — Elección de tecnologías
+
+**Node.js 22 + Express**
+Se escoge Node.js como runtime porque permite construir APIs REST de forma rápida y con bajo consumo de recursos. Express es el framework web más extendido del ecosistema Node.js: minimalista, sin opiniones forzadas y con amplia documentación. Se usa la versión 22 (LTS) para garantizar estabilidad a largo plazo.
+
+**MongoDB + Mongoose**
+Se opta por MongoDB como base de datos porque el proyecto gestiona datos semiestructurados (clientes y tickets) cuyo esquema puede evolucionar sin migraciones costosas. Mongoose actúa como ODM (Object Document Mapper): define esquemas con validaciones, tipos y valores por defecto directamente en el código JavaScript, eliminando la necesidad de SQL o migraciones manuales.
+
+**Docker + Docker Compose**
+Todo el stack se conteneriza para que el entorno de desarrollo sea idéntico al de producción, independientemente del sistema operativo del desarrollador. Docker Compose orquesta los tres servicios (app, mongodb, grafana) con un solo comando.
+
+**Grafana**
+Se incluye Grafana para monitorización visual del sistema. Al estar en la misma red Docker, puede conectarse a MongoDB sin exponer credenciales al exterior.
+
+---
+
+### Paso 2 — Diseño de la arquitectura de carpetas
+
+Se adopta una estructura en capas dentro de `src/`:
+
+| Capa | Archivo(s) | Responsabilidad |
+|------|------------|-----------------|
+| Entrada | `app.js` | Inicializar Express, registrar rutas, arrancar el servidor |
+| Conexión | `db.js` | Gestionar la conexión a MongoDB de forma aislada |
+| Modelos | `models/` | Definir el esquema de datos y las validaciones |
+| Rutas | `routes/` | Manejar las peticiones HTTP y devolver respuestas JSON |
+
+Esta separación garantiza que cada archivo tenga **una única responsabilidad**: si cambia la base de datos, solo se toca `db.js` y los modelos; si cambia un endpoint, solo se toca el archivo de rutas correspondiente.
+
+---
+
+### Paso 3 — Definición del modelo de datos
+
+**Cliente** tiene los campos mínimos para un CRM: `nombre`, `email` (único), `telefono` y un flag `activo` para implementar **borrado lógico** (el registro nunca se elimina físicamente, solo se marca como inactivo). Mongoose añade `createdAt` y `updatedAt` automáticamente con `timestamps: true`.
+
+**Ticket** referencia al Cliente mediante un `ObjectId` (relación entre documentos MongoDB). Tiene `estado` con tres valores posibles (`abierto`, `en progreso`, `cerrado`) y `prioridad` (`baja`, `media`, `alta`), ambos con enum de Mongoose para garantizar la integridad de los datos.
+
+---
+
+### Paso 4 — Diseño de la API REST
+
+Se siguen las convenciones REST estándar:
+
+- `GET` para leer, `POST` para crear, `PUT` para actualizar, `DELETE` para baja lógica.
+- Todas las rutas devuelven JSON.
+- Los errores devuelven el código HTTP apropiado (400 para datos inválidos, 404 para recurso no encontrado, 500 para errores de servidor).
+- El DELETE no elimina el registro: pone `activo: false`. Esto preserva el historial de tickets asociados al cliente.
+
+---
+
+### Paso 5 — Contenerización con Docker
+
+**Dockerfile**
+Se usa `node:22-alpine` como imagen base (alpine = mínimo tamaño, sin herramientas innecesarias). Se copian primero solo `package*.json` y se ejecuta `npm ci --omit=dev` antes de copiar el código fuente. Esto aprovecha la caché de capas de Docker: si el código cambia pero las dependencias no, Docker no reinstala los paquetes.
+
+**docker-compose.yaml**
+Se definen tres servicios en una red privada `DoD-CRM-NETWORK`. La app declara `depends_on: mongodb` para arrancar después de que el contenedor de MongoDB esté en pie. La variable de entorno `MONGO_URI` se inyecta en la app en tiempo de ejecución, sin hardcodear credenciales en el código.
+
+---
+
+### Paso 6 — Conexión interna entre contenedores (MongoDB ↔ App)
+
+> Este es un punto crítico del proyecto: **la app NO se conecta a MongoDB a través del host (`localhost`), sino a través de la red interna de Docker.**
+
+#### Cómo funciona la red interna de Docker
+
+Cuando Docker Compose levanta los servicios, crea automáticamente la red `DoD-CRM-NETWORK` de tipo `bridge`. Dentro de esa red, **cada servicio es accesible por su nombre de servicio** como si fuera un nombre DNS.
+
+El nombre del servicio MongoDB en `docker-compose.yaml` es `mongodb`. Por tanto, desde dentro del contenedor `app`, la dirección del servidor de base de datos es simplemente `mongodb`, no `localhost` ni ninguna IP.
+
+#### La URI de conexión
+MONGO_URI=mongodb://root:DoD_CRM_DATABASE_25@mongodb:27017/crm?authSource=admin
+↑
+nombre del servicio Docker
+(resuelto por DNS interno de la red bridge)
+
+
+El fragmento `@mongodb:27017` indica:
+- `mongodb` → nombre del contenedor en la red `DoD-CRM-NETWORK`, resuelto automáticamente por Docker
+- `27017` → puerto interno de MongoDB (no el puerto del host)
+- `?authSource=admin` → las credenciales `root` se validan contra la base de datos `admin`, donde MongoDB almacena los usuarios de sistema
+
+#### Diagrama del flujo interno
+
+HOST (tu máquina)
+┌──────────────────────────────────────────────────────┐
+│ puerto 3000 ──→ contenedor app (DoD) │
+│ puerto 3001 ──→ contenedor grafana │
+│ puerto 27017 ──→ contenedor mongodb │
+│ (expuesto solo para MongoDB Compass) │
+│ │
+│ Red interna DoD-CRM-NETWORK (bridge) │
+│ ┌───────────┐ @mongodb:27017 ┌────────────────┐ │
+│ │ app │ ───────────────→ │ mongodb │ │
+│ │ :3000 │ (DNS interno) │ :27017 │ │
+│ └───────────┘ └────────────────┘ │
+│ ↕ misma red bridge ↕ │
+│ ┌───────────┐ │
+│ │ grafana │ │
+│ │ :3000 │ │
+│ └───────────┘ │
+
+
+#### Por qué es seguro y correcto
+
+- La app **nunca usa `localhost`** para conectarse a MongoDB. Si lo hiciera, buscaría MongoDB dentro de su propio contenedor y fallaría con `ECONNREFUSED`.
+- El puerto `27017` se expone al host **solo para conveniencia** (ej. usar MongoDB Compass desde el ordenador). La comunicación real app↔MongoDB ocurre por la red interna y nunca sale del host.
+- Las credenciales solo viajan dentro de la red Docker, nunca por una red externa.
+- `depends_on: mongodb` garantiza que el contenedor de MongoDB arranca antes que la app, evitando errores de conexión en el inicio.
 
 ---
 
@@ -110,10 +224,10 @@ curl http://localhost:3001
 
 | Servicio | URL |
 |----------|-----|
-| API Node.js | http://localhost:3000 |
-| Health check | http://localhost:3000/health |
-| Grafana | http://localhost:3001 |
-| MongoDB | localhost:27017 |
+| API Node.js | http://localhost:3000 |  Punto de entrada principal
+| Health check | http://localhost:3000/health | Verificación de estado
+| Grafana | http://localhost:3001 | Panel de monitorización
+| MongoDB | localhost:27017 |Solo para herramientas como MongoDB Compass
 
 ### 7. Cerrar la aplicación
 
